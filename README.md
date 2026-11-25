@@ -42,6 +42,12 @@ npm run build
 npm start
 ```
 
+Para usar um arquivo de configuração local, copie o exemplo e edite:
+
+```bash
+cp .env.example .env
+```
+
 Variáveis de ambiente (opcionais):
 
 - `PORT` — porta HTTP (padrão `3000`);
@@ -52,6 +58,11 @@ Variáveis de ambiente (opcionais):
 ```bash
 CSV_PATH=./outro.csv npm start
 ```
+
+Variáveis já definidas no ambiente (shell, `-e`/`--env-file` do Docker ou
+`environment:` do compose) têm precedência sobre o `.env`. Em Docker, use
+`CSV_PATH=/app/data/Movielist.csv` no `.env` ou remova essa linha para herdar o
+valor da imagem.
 
 ## Verificação
 

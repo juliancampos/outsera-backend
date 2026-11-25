@@ -182,3 +182,47 @@ Log em texto das interações com LLMs/agentes durante a avaliação. Formato: d
 - **Não bloqueantes apontados:** índice do Git dividido entre renames staged e edições unstaged — o comando sugerido usa `git add src test ...` para incluir tudo; caminho do 500 sem teste automatizado (validado manualmente pelo reviewer); Docker Compose não executado, `Dockerfile` conferido apenas por leitura; seções antigas do plano ainda citam os caminhos históricos, mas a nota da seção 15 remapeia explicitamente.
 - **Ferramentas/skills:** read, shell (somente-leitura); skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
 
+## 2026-11-25 — Interação 26 (PO — configuração via .env)
+
+- **Usuário:** "quero incluir um arquivo `.env` para configuração. crie a implementação e um arquivo `.env.example`".
+- **Agente (PO):** leu `src/server/server.ts`, `.gitignore`, `.dockerignore`, `docker-compose.yml`, `Dockerfile` e a seção de variáveis do README. Acrescentou a seção 16 a `docs/PLANO_TECNICO.md` com as regras E1–E6, arquivos, checklist e critérios do Reviewer.
+- **Decisões do PO:** instalar `dotenv` e importar `dotenv/config` como primeira linha de `src/server/server.ts`, antes do Zod; manter a precedência das variáveis já presentes no ambiente; criar `.env.example` com `PORT`, `LOG_LEVEL` e `CSV_PATH` (aviso de que em Docker o caminho é `/app/data/Movielist.csv`); ignorar `.env` no Git e no Docker; README com `cp .env.example .env`; compose/Docker e comportamento da API inalterados; sem teste novo. Aguardando aprovação antes de chamar o @dev.
+- **Ferramentas/skills:** read, edit; skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
+
+## 2026-11-25 — Interação 27 (Developer)
+
+- **Usuário (via PO):** "O usuário aprovou o plano da seção 16; implemente sem fazer commit", seguindo as regras E1–E6, o checklist e os critérios da seção 16 de `docs/PLANO_TECNICO.md`.
+- **Agente (Developer):** rodou `npm install dotenv` (runtime, única dependência nova) e acrescentou `import 'dotenv/config';` como primeira linha de `src/server/server.ts`, antes do Zod e da leitura de `process.env`. Criou `.env.example` com `PORT=3000`, `LOG_LEVEL=info` e `CSV_PATH=docs/Movielist.csv` mais o aviso sobre Docker; não criou `.env` real. Adicionou `.env` ao `.gitignore` e ao `.dockerignore` (sem ignorar `.env.example`). README passou a ensinar `cp .env.example .env`, explicar a precedência das variáveis já existentes no ambiente e repetir o aviso de `CSV_PATH=/app/data/Movielist.csv` em Docker, preservando os exemplos anteriores. Status da seção 16 passou a `aprovado`. Nenhum commit.
+- **Comandos rodados:** `npm run build` (limpo), `npm test` (8/8 aprovados), `npm audit` (0 vulnerabilidades), `grep` de `dotenv`/`process.env` e validações manuais de `npm start` com `.env` temporário (`PORT=3101`) e com override de shell (`PORT=3102 npm start`); `.env` temporário removido ao final.
+- **Ferramentas/skills:** read, write, edit, grep, shell; skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
+- **Observações:** ausência de `{ override: true }` preserva a precedência do shell/Docker; Zod, defaults, app, rotas, controllers, service, db, logger, respostas, logs e testes intactos. Novo teste automatizado não adicionado, conforme E6.
+
+## 2026-11-25 — Interação 28 (QA & Code Reviewer — configuração via .env)
+
+- **Usuário (via PO):** "Revise a configuração via `.env` antes do commit", conforme workflow `.agents/AGENTES.md`.
+- **Agente (Reviewer):** leu a seção 16 do plano, `src/server/server.ts`, `.env.example`, ignores, README e o diff; confirmou `dotenv/config` como primeira instrução e único uso da lib, ausência de `override`, Zod/defaults intactos, precedência no código do dotenv instalado e nos probes do dev, `.env` ignorado por Git/Docker e sem `.env` real no working tree. Rodou `npm run build` (limpo), `npm test` (8/8), `npm audit` (0 vulnerabilidades) e `git status --short`. Veredito: **APROVADO**, sem bloqueantes; gerou comando de commit sem executá-lo.
+- **Não bloqueantes apontados:** a seção 5 ainda dizia “não usar `dotenv`” — o PO acrescentou nota de supersedência; checklist da seção 16 citava a Interação 26 em vez da 27 — corrigido; `git log` mostra que as seções 10–15 já foram commitadas (`9435aa5`, `11440d5`, `ba59272`, `ece064f`), então o pendente real é só a seção 16; `docker run --env-file` não foi executado (fora do escopo), precedência confirmada no shell; risco operacional: um `.env` local com segredo é lido pelo servidor, embora ignorado.
+- **Ferramentas/skills:** read, shell (somente-leitura), edit (notas no plano e este log); skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
+
+## 2026-11-25 — Interação 29 (PO — eliminar console restante)
+
+- **Usuário:** "altere todos os console. para utilizar o logger com o pino".
+- **Agente (PO):** rodou grep e encontrou um único `console.error` em código: `src/server/server.ts:28`, no `main().catch` usado quando a validação do env falha antes de o logger ser criado. Acrescentou a seção 17 a `docs/PLANO_TECNICO.md` com as regras C1–C5, arquivos, checklist e critérios do Reviewer.
+- **Decisões do PO:** criar o logger no escopo do módulo, antes de `main()`, com nível lido de `envSchema.shape.LOG_LEVEL` e fallback `info` para valor inválido; reaproveitar esse logger no `.catch` e remover a criação duplicada dentro de `main()`; trocar o texto por `logger.error({ err: error }, 'Falha na inicialização')`. Nenhuma dependência ou teste novo; demais arquivos inalterados. Aguardando aprovação antes de chamar o @dev.
+- **Ferramentas/skills:** read, grep, edit; skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
+
+## 2026-11-25 — Interação 30 (Developer)
+
+- **Usuário (via PO):** "O usuário aprovou o plano da seção 17; implemente sem fazer commit", seguindo as regras C1–C5, o checklist e os critérios da seção 17 de `docs/PLANO_TECNICO.md`.
+- **Agente (Developer):** em `src/server/server.ts`, moveu a criação do logger para o escopo do módulo (após `envSchema`, antes de `main()`), derivando o nível de `envSchema.shape.LOG_LEVEL.safeParse(process.env.LOG_LEVEL)` com fallback `info`; removeu `createLogger(env.LOG_LEVEL)` de dentro de `main()` e reaproveitou o logger do módulo no startup e no `server.on('error')`. Trocou o `console.error` do `main().catch` por `logger.error({ err: error }, 'Falha na inicialização')`, mantendo `process.exitCode = 1` e sem converter o erro em string. `import 'dotenv/config'` permanece a primeira instrução; nenhum `any`. Status da seção 17 do plano alterado para `aprovado`. Nenhum commit.
+- **Comandos rodados:** grep de `console.` em `src/` e `test/` (zero ocorrências), `npm run build` (limpo), `npm test` (8/8 aprovados), `PORT=abc npm start` (uma linha JSON de erro via pino com `err` serializado e `exit code 1`) e `PORT=3010 CSV_PATH=docs/Movielist.csv npm start` + `curl` em `/api/producers/intervals` (HTTP 200 com o `min`/`max` de referência); servidor encerrado e porta liberada ao final.
+- **Ferramentas/skills:** read, edit, grep, shell; skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
+- **Observações:** nenhuma dependência nova, nenhum teste novo e nenhuma alteração em `app.ts`, rotas, controllers, service, db, `utils/logger.ts`, README, Docker ou testes. Existe um `.env` local ignorado com `CSV_PATH=docsss/Movielist.csv`: não foi alterado; a validação com env válido usou override de shell para o CSV correto. Menções históricas a `console` em docs/plano/log foram preservadas.
+
+## 2026-11-25 — Interação 31 (QA & Code Reviewer — último console)
+
+- **Usuário (via PO):** "Revise a substituição do último console por logger antes do commit", conforme workflow `.agents/AGENTES.md`.
+- **Agente (Reviewer):** leu a seção 17 do plano, `src/server/server.ts` e o diff; confirmou `dotenv/config` como primeira instrução, logger no escopo do módulo com `safeParse`/fallback, mesmo logger reaproveitado, `.catch` com `logger.error({ err }, ...)` e `exitCode = 1`, grep zero de `console.` em `src/`/`test/`, `process.env` só no server e `pino` só na fachada. Rodou `npm run build` (limpo), `npm test` (8/8), `npm audit --audit-level=high` (0 vulnerabilidades), `PORT=abc npm start` (JSON do pino com `err` do Zod, exit 1) e probes com `LOG_LEVEL=error`/`info` confirmando que o nível é honrado e o formato de requisição intacto. Veredito: **APROVADO**, sem bloqueantes; gerou comando de commit sem executá-lo.
+- **Não bloqueantes apontados:** `.env` local ignorado com `CSV_PATH=docsss/Movielist.csv` — verificado com `git check-ignore`, não versionado e não alterado; afeta só `npm start` local sem override; com `LOG_LEVEL` inválido o fallback `info` serve apenas para o logger do `.catch`, enquanto o Zod ainda rejeita o valor e aborta com erro estruturado; Docker/compose não executados.
+- **Ferramentas/skills:** read, shell (somente-leitura); skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
+

@@ -48,6 +48,8 @@ API REST para consulta dos intervalos entre prêmios consecutivos do produtor na
 - **Nativas (sem dependência):** `node:sqlite`, `node:test`, `node:assert`, `fetch` do próprio Node.
 - **Não usar:** `csv-parse` (o formato é fixo e não há aspas no dataset), `supertest` (o teste sobe HTTP real), `tsx`/`dotenv` (compilação com `tsc` e env do processo/Docker).
 
+> **Nota (2026-11-25):** `dotenv` passou a ser usado conforme a seção 16; a restrição acima foi supersedida apenas para ele.
+
 ## 6. Arquivos a criar
 
 | Arquivo | Responsabilidade |
@@ -306,4 +308,68 @@ Ajustar: `package.json`, `Dockerfile`, `test/awards.integration.test.ts`, `docs/
 - `requestLogger` continua primeiro; 404/500 continuam depois das rotas; logs seguem `{ url, responseTime: "<n> ms" }`.
 - Entrypoint compilado `dist/src/server/server.js` existe e é usado por `npm start` e Docker.
 - Sem dependência nova, sem `any`, sem mudança de comportamento; `npm test` 8/8.
+
+## 16. Configuração via `.env` (PO — 2026-11-25)
+
+Status: **aprovado** para o `Developer`. Solicitação do usuário: "quero incluir um arquivo `.env` para configuração. crie a implementação e um arquivo `.env.example`".
+
+### Regras
+
+| # | Regra |
+|---|-------|
+| E1 | Adicionar `dotenv` como dependência de runtime. Em `src/server/server.ts`, importar `'dotenv/config'` como **primeira linha**, antes de qualquer leitura/validação de env, para que `.env` seja carregado antes do `envSchema.parse(process.env)`. Nenhum outro arquivo lê `.env`. |
+| E2 | Comportamento do `dotenv` padrão é preservado: variável já existente no `process.env` (shell, `docker run -e`/`--env-file`, `environment:` do compose) **não** é sobrescrita pelo `.env`. Assim, os overrides atuais continuam funcionando. |
+| E3 | Criar `.env.example` versionado com as três variáveis já existentes: `PORT=3000`, `LOG_LEVEL=info` e `CSV_PATH=docs/Movielist.csv`, com um comentário curto de que dentro do Docker o caminho deve ser `/app/data/Movielist.csv` (ou a linha deve ser removida). **Não** criar nem versionar um `.env` real. |
+| E4 | `.gitignore`: adicionar `.env` (sem ignorar `.env.example`). `.dockerignore`: adicionar `.env` para que nenhuma configuração local entre na imagem. `docker-compose.yml` e `Dockerfile` não mudam. |
+| E5 | README: ensinar `cp .env.example .env`, explicar a precedência do item E2 e o ajuste de `CSV_PATH` para Docker. Manter a documentação existente de variáveis e exemplos de `CSV_PATH`. |
+| E6 | Nenhuma mudança em `app.ts`, rotas, controllers, service, db, logger, respostas, logs ou testes. Sem nova dependência além de `dotenv`; sem `any`. Não é necessário novo teste automatizado: a mudança é um import de configuração; validar manualmente com `.env` presente e com variável de shell sobrepondo o arquivo. |
+
+### Arquivos a modificar
+
+`package.json`, `package-lock.json`, `src/server/server.ts`, `.env.example` (novo), `.gitignore`, `.dockerignore`, `README.md`, `docs/PLANO_TECNICO.md` e `AGENT_LOG.md`.
+
+### Checklist do Developer
+
+1. `npm install dotenv` e adicionar `import 'dotenv/config'` no topo de `src/server/server.ts`.
+2. Criar `.env.example` e ajustar `.gitignore`/`.dockerignore`.
+3. Atualizar README, status da seção 16 e `AGENT_LOG.md` (Interação 27).
+4. Rodar `npm run build` e `npm test` (8/8); validar `npm start` com `.env` copiado e com override de shell; nenhum commit.
+
+### Critérios do Reviewer
+
+- `dotenv/config` é a primeira instrução de `src/server/server.ts` e não aparece em outro arquivo.
+- `.env` está ignorado por Git e Docker; `.env.example` está versionado com as três variáveis e o aviso sobre Docker.
+- Variável de shell/Docker continua prevalecendo sobre `.env`; Zod e defaults intactos.
+- `npm test` 8/8, `npm run build` limpo, sem `any`, sem mudança de rotas/respostas/logs; `npm audit` sem vulnerabilidades novas.
+
+## 17. Substituir o último `console` por logger (PO — 2026-11-25)
+
+Status: **aprovado** para o `Developer`. Solicitação do usuário: "altere todos os console. para utilizar o logger com o pino".
+
+### Regras
+
+| # | Regra |
+|---|-------|
+| C1 | Substituir o único `console.error` restante em `src/server/server.ts` (`main().catch`) por `logger.error({ err: error }, 'Falha na inicialização')`. Manter `process.exitCode = 1`. |
+| C2 | Criar o logger no escopo do módulo, **antes** de `main()`, para que o `.catch` também tenha logger mesmo quando a validação do env falha. Derivar o nível de `envSchema.shape.LOG_LEVEL.safeParse(process.env.LOG_LEVEL)`, com fallback `info` se o valor for inválido; remover a criação duplicada dentro de `main()` e reaproveitar o mesmo logger no startup e no `server.on('error')`. |
+| C3 | Nenhum `console.log`/`console.error`/`console.warn` em `src/` ou `test/` — grep deve retornar zero. Menções históricas em `docs/PLANO_TECNICO.md`/`AGENT_LOG.md` são registros, não código, e não precisam ser reescritas. |
+| C4 | Sem dependência nova, sem `any`, sem mudança em app, rotas, controllers, service, db, `utils/logger.ts`, README, Docker ou testes. Em caso de env inválido, a saída passa a ser JSON estruturado em vez de texto puro. |
+| C5 | Não adicionar teste automatizado: a alteração é uma linha de log mais a movimentação da criação do logger. Validar manualmente com env inválido (ex.: `PORT=abc npm start`) e com env válido. |
+
+### Arquivos a modificar
+
+`src/server/server.ts`, `docs/PLANO_TECNICO.md` e `AGENT_LOG.md`.
+
+### Checklist do Developer
+
+1. Mover/criar o logger no topo de `src/server/server.ts` com nível validado/fallback e remover a criação interna.
+2. Trocar `console.error` do `.catch` por `logger.error({ err: error }, ...)`.
+3. Rodar grep de `console.` em `src/` e `test/`, `npm run build` e `npm test` (8/8) e validar manualmente env inválido/válido.
+4. Atualizar o status da seção 17 e registrar a Interação 29 no `AGENT_LOG.md`; nenhum commit.
+
+### Critérios do Reviewer
+
+- Grep zero para `console.` em código-fonte e testes; `pino` continua isolado em `src/utils/logger.ts`.
+- Logger existe antes de `main()`; falha de validação do env gera linha JSON via logger; `LOG_LEVEL` válido continua honrado.
+- Sem `any`, sem deps novas, sem mudança de comportamento das rotas/logs de requisição; `npm test` 8/8.
 

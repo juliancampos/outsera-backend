@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { z } from 'zod';
 import { createWinsRepository } from '../db/repository';
 import { createLogger } from '../utils/logger';
@@ -9,9 +10,11 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 });
 
+const parsedLevel = envSchema.shape.LOG_LEVEL.safeParse(process.env.LOG_LEVEL);
+const logger = createLogger(parsedLevel.success ? parsedLevel.data : 'info');
+
 async function main(): Promise<void> {
   const env = envSchema.parse(process.env);
-  const logger = createLogger(env.LOG_LEVEL);
   const repository = await createWinsRepository(env.CSV_PATH);
   const server = createApp(repository, logger).listen(env.PORT, '0.0.0.0', () => {
     logger.info(`API ouvindo em 0.0.0.0:${env.PORT} (CSV: ${env.CSV_PATH})`);
@@ -24,6 +27,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error('Falha na inicialização:', error instanceof Error ? error.message : error);
+  logger.error({ err: error }, 'Falha na inicialização');
   process.exitCode = 1;
 });
