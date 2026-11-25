@@ -365,11 +365,81 @@ Status: **aprovado** para o `Developer`. Solicitação do usuário: "altere todo
 1. Mover/criar o logger no topo de `src/server/server.ts` com nível validado/fallback e remover a criação interna.
 2. Trocar `console.error` do `.catch` por `logger.error({ err: error }, ...)`.
 3. Rodar grep de `console.` em `src/` e `test/`, `npm run build` e `npm test` (8/8) e validar manualmente env inválido/válido.
-4. Atualizar o status da seção 17 e registrar a Interação 29 no `AGENT_LOG.md`; nenhum commit.
+4. Atualizar o status da seção 17 e registrar a Interação 30 no `AGENT_LOG.md`; nenhum commit.
 
 ### Critérios do Reviewer
 
 - Grep zero para `console.` em código-fonte e testes; `pino` continua isolado em `src/utils/logger.ts`.
 - Logger existe antes de `main()`; falha de validação do env gera linha JSON via logger; `LOG_LEVEL` válido continua honrado.
 - Sem `any`, sem deps novas, sem mudança de comportamento das rotas/logs de requisição; `npm test` 8/8.
+
+## 18. Rota POST para inserir filme (PO — 2026-11-25)
+
+Status: **aprovado**. Solicitação do usuário: "crie uma rota post para inserir um novo registro. utilize o Zod para validar os dados recebidos. Lembrando que a propriedade year deve receber um ano valido, ano futuro nao poder ser aceito. year, title, studios, producers devem conter caracteres. a propriedade winner deve receber a palavra yes ou nao deve ser informado."
+
+### Regras
+
+| # | Regra |
+|---|-------|
+| P1 | Nova rota `POST /api/movies` no mesmo path do GET. Sucesso: `201` com o registro criado (incluindo `winner` booleano). Corpo inválido: `400` com `{ error: 'Corpo inválido' }`. Erro interno: `500` com `{ error: 'Internal server error' }`. |
+| P2 | Interpretação fixa de `winner`: a palavra exata `'yes'` vira `winner: true`; **ausência** da propriedade vira `winner: false`; `'no'`, `null`, booleanos ou qualquer outro valor são rejeitados com `400`. |
+| P3 | Schema Zod no controller (usando o Zod já instalado), `strict: true`: `year` é `number` inteiro, `>= 1` e `<= new Date().getFullYear()` (ano atual incluído, futuro rejeitado); `title`, `studios` e `producers` são strings com `.trim().min(1)` e são armazenados aparados. Chaves desconhecidas são rejeitadas. Sem `any`. |
+| P4 | `src/server/app.ts` passa a montar `express.json()` depois de `requestLogger` e antes das rotas. JSON malformado deve responder `400` com `{ error: 'Corpo JSON inválido' }` via handler de erro existente, sem log de erro (é falha do cliente); os demais erros continuam `500` com `logger.error`. |
+| P5 | `WinsRepository` ganha `createMovie(movie: Movie): Movie`. A inserção grava em `movies` e, quando `winner` é `true`, também grava as vitórias em `wins` usando **a mesma regra de split de produtores** do CSV (`,` ou `and`, trim, dedupe, vazios ignorados). Extrair esse split para um helper local reaproveitado pelo parse do CSV e pela inserção. Usar as prepared statements existentes, `BEGIN`/`COMMIT`/`ROLLBACK`, sem concatenar SQL. |
+| P6 | `src/controller/movies.ts` ganha `createMovieController(repository)`; `src/routes/index.ts` registra `router.post('/api/movies', ...)` depois do GET. `app.ts`, service de intervalos, `utils/logger.ts` e ordem do middleware de log permanecem inalterados. |
+| P7 | OpenAPI: adicionar `post` em `/api/movies` com `requestBody` obrigatório, schema `NewMovie` (`year`, `title`, `studios`, `producers` obrigatórios; `winner` opcional aceitando só `'yes'`; descrição de `year` até o ano atual) e respostas `201`/`400`/`500`. Atualizar o teste da spec para conferir o `post`. |
+| P8 | Testes **somente de integração**, reaproveitando `withApi`: (1) POST válido sem `winner` → `201`, `winner:false` e registro encontrado no GET; (2) dois POSTs com `winner:'yes'` para o mesmo produtor em anos consecutivos → intervalo `1` aparece em `/api/producers/intervals`; (3) casos inválidos em tabela (ano futuro, ano `0`, texto vazio/só espaços em cada campo, `winner:'no'`, chave desconhecida) → `400` JSON; (4) JSON malformado → `400` JSON. |
+| P9 | README documentar o POST, o corpo, a regra de `winner`, exemplos de `curl` e statuses. Nenhuma dependência nova; logs de requisição continuam `{ url, responseTime: "<n> ms" }`. |
+
+### Arquivos a modificar
+
+`src/server/app.ts`, `src/controller/movies.ts`, `src/routes/index.ts`, `src/db/repository.ts`, `src/routes/openapi.ts`, `test/awards.integration.test.ts`, `README.md`, `docs/PLANO_TECNICO.md`, `AGENT_LOG.md`.
+
+### Checklist do Developer
+
+1. Adicionar `express.json()` e o ramo de 400 no handler de erro de `src/server/app.ts`.
+2. Implementar o schema e `createMovieController` em `src/controller/movies.ts`; registrar o POST em `src/routes/index.ts`.
+3. Implementar `createMovie` e extrair o helper de produtores em `src/db/repository.ts`.
+4. Atualizar OpenAPI, testes de integração e README.
+5. Rodar `npm run build` e `npm test`; atualizar status da seção 18 e registrar a Interação 33 no `AGENT_LOG.md`; nenhum commit.
+
+### Critérios do Reviewer
+
+- POST válido grava em `movies` e, com `yes`, em `wins`; anos futuros e textos vazios são rejeitados por Zod; `winner` ausente vira `false`.
+- JSON malformado e chaves desconhecidas retornam `400`; nenhum `any`, nenhuma dependência nova, nenhuma mudança nas rotas GET/logs.
+- Swagger descreve o POST; testes de integração cobrem sucesso, persistência em intervalos e falhas; `npm test` verde.
+
+## 19. Lista de produtores com filtros e ordenação (PO — 2026-11-25)
+
+Status: **aprovado**. Solicitação do usuário: "crie uma rota para retornar a lista de produtores com filtro por nome, ano que venceu, quantidade de vitorias, e por apenas vencedores. opcao para ordenar por quantidade de vitorias, da maior quantidade para a menor".
+
+### Regras
+
+| # | Regra |
+|---|-------|
+| R1 | Nova rota `GET /api/producers` retornando `200` com um array de `{ producer: string, wins: number, years: number[] }`, onde `wins` é a quantidade de vitórias e `years` são os anos em que venceu, ordenados. Parâmetros inválidos retornam `400` com `{ error: 'Parâmetros de consulta inválidos' }`. |
+| R2 | O universo da lista é **todos os produtores presentes em `movies`**, vencedores ou não. Adicionar `allProducers(): string[]` a `WinsRepository`, reaproveitando o mesmo split de produtores já usado pelo CSV/`winsFrom` (`,` ou `and`, trim, dedupe). `onlyWinners=true` restringe a quem tem `wins > 0`. |
+| R3 | Filtros via query string: `name` (substring case-insensitive), `year` (ano em que venceu; inteiro de `1` até o ano atual), `wins` (**quantidade exata** de vitórias, inteiro `>= 0`) e `onlyWinners` (`true`/`false` minúsculos). Parâmetros desconhecidos são ignorados, como em `GET /api/movies`. |
+| R4 | Ordenação: padrão por `producer` ascendente; `sort=wins_desc` ordena por `wins` decrescente, com desempate por `producer` ascendente. Qualquer outro valor de `sort` é `400`. |
+| R5 | Agregação em novo service `src/service/producers.ts` a partir de `repository.allWins()` + `repository.allProducers()`. Novo handler `listProducersController` em `src/controller/producers.ts`, com schema Zod da query; `producersController` (intervalos) permanece intacto. Registrar `router.get('/api/producers', ...)` em `src/routes/index.ts` antes de `/api/producers/intervals`. |
+| R6 | OpenAPI: adicionar o path `/api/producers` com os cinco parâmetros, respostas `200`/`400`/`500` e componente `ProducerSummary`. Atualizar o teste da spec para verificar o path, os parâmetros e o schema. |
+| R7 | Testes **somente de integração**: listagem completa com `wins`/`years` corretos da fixture; filtros `name`, `year`, `wins`; `onlyWinners=true` usando um produtor sem vitórias inserido via POST; `sort=wins_desc`; casos inválidos (ano futuro, `wins` não numérico, `sort` desconhecido, `onlyWinners=yes`) retornando `400`. |
+| R8 | README documentar a rota, parâmetros, exemplo de resposta e ordenação. Nenhuma dependência nova; cálculo de intervalos, rotas GET existentes, formato de log e Docker inalterados. |
+
+### Arquivos a modificar
+
+`src/db/repository.ts`, `src/service/producers.ts` (novo), `src/controller/producers.ts`, `src/routes/index.ts`, `src/routes/openapi.ts`, `test/awards.integration.test.ts`, `README.md`, `docs/PLANO_TECNICO.md`, `AGENT_LOG.md`.
+
+### Checklist do Developer
+
+1. Adicionar `allProducers()` ao repositório reaproveitando o split existente.
+2. Criar o service de agregação e o controller com Zod; registrar a rota.
+3. Atualizar OpenAPI, testes de integração e README.
+4. Rodar `npm run build` e `npm test`; atualizar status da seção 19 e registrar a Interação 36 no `AGENT_LOG.md`; nenhum commit.
+
+### Critérios do Reviewer
+
+- Lista inclui produtores sem vitórias; `onlyWinners=true` os remove; filtros e ordenação funcionam juntos.
+- `years` e `wins` refletem a tabela `wins`, inclusive após POSTs com `yes`.
+- Zod rejeita valores inválidos; sem `any`, sem deps novas; rotas/logs/intervalos inalterados; `npm test` verde.
 

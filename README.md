@@ -101,6 +101,62 @@ curl 'http://localhost:3000/api/movies?year=2000&producers=solo&winner=true'
 curl 'http://localhost:3000/api/movies?studios=Different&winner=false'
 ```
 
+## Lista de produtores
+
+`GET /api/producers` retorna `{ producer, wins, years }` para todos os produtores
+presentes em filmes carregados ou inseridos, inclusive quem nunca venceu
+(`wins: 0`, `years: []`). `wins` conta anos distintos de vitória e `years` vem
+ordenado.
+
+Filtros opcionais na query, combinados com `AND`:
+
+| Parâmetro | Regra |
+|-----------|-------|
+| `name` | substring do nome, case-insensitive |
+| `year` | ano de vitória, inteiro de `1` até o ano atual |
+| `wins` | quantidade exata de vitórias, inteiro `>= 0` |
+| `onlyWinners` | `true` ou `false` (minúsculos); `true` remove quem tem `wins: 0` |
+| `sort` | somente `wins_desc` (mais vitórias primeiro) |
+
+Ordem padrão: `producer` ascendente. Com `sort=wins_desc`, ordena por `wins`
+decrescente e desempata por `producer` ascendente. Parâmetros desconhecidos são
+ignorados; valores inválidos retornam `400` com
+`{"error":"Parâmetros de consulta inválidos"}`.
+
+```bash
+curl 'http://localhost:3000/api/producers?name=joel&onlyWinners=true'
+```
+
+```json
+[{ "producer": "Joel Silver", "wins": 2, "years": [1990, 1991] }]
+```
+
+## Inserção de filmes
+
+`POST /api/movies` recebe um corpo JSON com `year`, `title`, `studios` e
+`producers` obrigatórios:
+
+| Campo | Regra |
+|-------|-------|
+| `year` | inteiro de `1` até o ano atual |
+| `title`, `studios`, `producers` | texto não vazio (aparado antes de gravar) |
+| `winner` | opcional: a palavra exata `"yes"` vira `true`; ausente vira `false` |
+
+Qualquer outro valor de `winner` (inclusive `"no"`, `null` ou booleanos) e
+chaves desconhecidas são rejeitados. Produtores separados por `,` ou `and`
+geram vitórias individualmente quando `winner` é `"yes"`, alimentando os
+intervalos. Os dados ficam em SQLite em memória e são perdidos ao reiniciar.
+
+Statuses: `201` com o filme criado, `400` com `{"error":"Corpo inválido"}` ou
+`{"error":"Corpo JSON inválido"}`, e `500` com
+`{"error":"Internal server error"}`.
+
+```bash
+curl -X POST http://localhost:3000/api/movies \
+  -H 'Content-Type: application/json' \
+  -d '{"year":2024,"title":"Novo Filme","studios":"Novo Estúdio","producers":"P1, P2","winner":"yes"}'
+```
+
 ## Documentação (Swagger)
 
 Com a API rodando:

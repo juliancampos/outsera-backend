@@ -87,9 +87,31 @@ async function get(pathname: string, baseUrl: string): Promise<{ status: number;
   return { status: response.status, contentType: response.headers.get('content-type'), body };
 }
 
+async function post(
+  pathname: string,
+  baseUrl: string,
+  body: string,
+): Promise<{ status: number; contentType: string | null; body: unknown }> {
+  const response = await fetch(`${baseUrl}${pathname}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body,
+  });
+  const responseBody: unknown = await response.json();
+  return { status: response.status, contentType: response.headers.get('content-type'), body: responseBody };
+}
+
 interface SpecPath {
   get: {
-    parameters: Array<{ name: string; required: boolean; schema: { type: string } }>;
+    parameters: Array<{
+      name: string;
+      required: boolean;
+      schema: { type: string; enum?: string[] };
+    }>;
+    responses: Record<string, unknown>;
+  };
+  post: {
+    requestBody: { required: boolean; content: Record<string, { schema: { $ref: string } }> };
     responses: Record<string, unknown>;
   };
 }
@@ -97,6 +119,9 @@ interface SpecPath {
 interface SpecResponse {
   openapi: string;
   paths: Record<string, SpecPath>;
+  components: {
+    schemas: Record<string, { type: string; properties: Record<string, { type: string }>; required: string[] }>;
+  };
 }
 
 async function withAlternativeApi(run: (baseUrl: string) => Promise<void>): Promise<void> {
@@ -219,6 +244,219 @@ test('GET /api/movies com parâmetros inválidos: 400 em JSON', async () => {
   });
 });
 
+test('GET /api/producers sem filtros: todas as vitórias, years deduplicados e ordem alfabética', async () => {
+  await withAlternativeApi(async (baseUrl) => {
+    const result = await get('/api/producers', baseUrl);
+    assert.equal(result.status, 200);
+    assert.match(result.contentType ?? '', /application\/json/);
+    assert.deepEqual(result.body, [
+      { producer: 'Extra', wins: 1, years: [2010] },
+      { producer: 'Lonely', wins: 1, years: [1990] },
+      { producer: 'P1', wins: 3, years: [2000, 2001, 2020] },
+      { producer: 'P2', wins: 3, years: [2005, 2006, 2025] },
+      { producer: 'P3', wins: 2, years: [2010, 2015] },
+      { producer: 'P4', wins: 2, years: [1950, 1969] },
+      { producer: 'Solo', wins: 1, years: [2000] },
+      { producer: 'Solo 2', wins: 1, years: [2001] },
+    ]);
+  });
+});
+
+test('GET /api/producers: name, year e wins exato', async () => {
+  await withAlternativeApi(async (baseUrl) => {
+    const cases: Array<[string, unknown]> = [
+      ['/api/producers?name=p1', [{ producer: 'P1', wins: 3, years: [2000, 2001, 2020] }]],
+      [
+        '/api/producers?name=SOLO',
+        [
+          { producer: 'Solo', wins: 1, years: [2000] },
+          { producer: 'Solo 2', wins: 1, years: [2001] },
+        ],
+      ],
+      [
+        '/api/producers?year=2010',
+        [
+          { producer: 'Extra', wins: 1, years: [2010] },
+          { producer: 'P3', wins: 2, years: [2010, 2015] },
+        ],
+      ],
+      [
+        '/api/producers?wins=3',
+        [
+          { producer: 'P1', wins: 3, years: [2000, 2001, 2020] },
+          { producer: 'P2', wins: 3, years: [2005, 2006, 2025] },
+        ],
+      ],
+      ['/api/producers?year=2010&foo=bar', [
+        { producer: 'Extra', wins: 1, years: [2010] },
+        { producer: 'P3', wins: 2, years: [2010, 2015] },
+      ]],
+    ];
+
+    for (const [pathname, expected] of cases) {
+      const result = await get(pathname, baseUrl);
+      assert.equal(result.status, 200, pathname);
+      assert.deepEqual(result.body, expected, pathname);
+    }
+  });
+});
+
+test('GET /api/producers: onlyWinners remove produtores sem vitória', async () => {
+  await withAlternativeApi(async (baseUrl) => {
+    const created = await post(
+      '/api/movies',
+      baseUrl,
+      JSON.stringify({ year: 2024, title: 'Sem vitória', studios: 'Estúdio', producers: 'P1, New Guy' }),
+    );
+    assert.equal(created.status, 201);
+
+    const all = await get('/api/producers?onlyWinners=false', baseUrl);
+    assert.equal(all.status, 200);
+    const allBody = all.body as Array<{ producer: string; wins: number; years: number[] }>;
+    assert.deepEqual(
+      allBody.find((item) => item.producer === 'New Guy'),
+      { producer: 'New Guy', wins: 0, years: [] },
+    );
+
+    const winners = await get('/api/producers?onlyWinners=true', baseUrl);
+    assert.equal(winners.status, 200);
+    const winnersBody = winners.body as Array<{ producer: string }>;
+    assert.equal(winnersBody.some((item) => item.producer === 'New Guy'), false);
+    assert.equal(winnersBody.length, 8);
+  });
+});
+
+test('GET /api/producers: sort=wins_desc com desempate e filtro wins exato', async () => {
+  await withAlternativeApi(async (baseUrl) => {
+    const sorted = await get('/api/producers?sort=wins_desc', baseUrl);
+    assert.equal(sorted.status, 200);
+    assert.deepEqual(
+      (sorted.body as Array<{ producer: string }>).map((item) => item.producer),
+      ['P1', 'P2', 'P3', 'P4', 'Extra', 'Lonely', 'Solo', 'Solo 2'],
+    );
+
+    const combined = await get('/api/producers?wins=1&sort=wins_desc', baseUrl);
+    assert.equal(combined.status, 200);
+    assert.deepEqual(
+      (combined.body as Array<{ producer: string }>).map((item) => item.producer),
+      ['Extra', 'Lonely', 'Solo', 'Solo 2'],
+    );
+  });
+});
+
+test('GET /api/producers com parâmetros inválidos: 400 em JSON', async () => {
+  const currentYear = new Date().getFullYear();
+  const pathnames = [
+    `/api/producers?year=${currentYear + 1}`,
+    '/api/producers?year=0',
+    '/api/producers?wins=abc',
+    '/api/producers?sort=foo',
+    '/api/producers?onlyWinners=yes',
+  ];
+
+  await withAlternativeApi(async (baseUrl) => {
+    for (const pathname of pathnames) {
+      const result = await get(pathname, baseUrl);
+      assert.equal(result.status, 400, pathname);
+      assert.match(result.contentType ?? '', /application\/json/);
+      assert.deepEqual(result.body, { error: 'Parâmetros de consulta inválidos' }, pathname);
+    }
+  });
+});
+
+test('POST /api/movies sem winner: 201, winner false e registro encontrado no GET', async () => {
+  await withAlternativeApi(async (baseUrl) => {
+    const movie = { year: 2024, title: '  Novo Filme  ', studios: 'Novo Estúdio', producers: 'P1, P2' };
+    const created = await post('/api/movies', baseUrl, JSON.stringify(movie));
+    assert.equal(created.status, 201);
+    assert.match(created.contentType ?? '', /application\/json/);
+    assert.deepEqual(created.body, {
+      year: 2024,
+      title: 'Novo Filme',
+      studios: 'Novo Estúdio',
+      producers: 'P1, P2',
+      winner: false,
+    });
+
+    const found = await get('/api/movies?title=Novo%20Filme', baseUrl);
+    assert.equal(found.status, 200);
+    assert.deepEqual(found.body, [created.body]);
+  });
+});
+
+test('POST /api/movies com winner yes: vitórias gravadas e intervalo gerado', async () => {
+  const currentYear = new Date().getFullYear();
+  const producer = 'Produtor Intervalo';
+
+  await withAlternativeApi(async (baseUrl) => {
+    for (const year of [currentYear - 1, currentYear]) {
+      const created = await post(
+        '/api/movies',
+        baseUrl,
+        JSON.stringify({ year, title: `Vitória ${year}`, studios: 'Estúdio', producers: producer, winner: 'yes' }),
+      );
+      assert.equal(created.status, 201);
+      assert.deepEqual(created.body, {
+        year,
+        title: `Vitória ${year}`,
+        studios: 'Estúdio',
+        producers: producer,
+        winner: true,
+      });
+    }
+
+    const result = await get('/api/producers/intervals', baseUrl);
+    assert.equal(result.status, 200);
+    const intervals = result.body as Intervals;
+    assert.ok(
+      intervals.min.some(
+        (item) =>
+          item.producer === producer &&
+          item.interval === 1 &&
+          item.previousWin === currentYear - 1 &&
+          item.followingWin === currentYear,
+      ),
+    );
+  });
+});
+
+test('POST /api/movies com corpo inválido: 400 em JSON', async () => {
+  const currentYear = new Date().getFullYear();
+  const valid = { year: 2024, title: 'Válido', studios: 'Estúdio', producers: 'P1' };
+  const cases: Array<Record<string, unknown>> = [
+    { ...valid, year: currentYear + 1 },
+    { ...valid, year: 0 },
+    { ...valid, title: '' },
+    { ...valid, title: '   ' },
+    { ...valid, studios: '' },
+    { ...valid, studios: '   ' },
+    { ...valid, producers: '' },
+    { ...valid, producers: '   ' },
+    { ...valid, winner: 'no' },
+    { ...valid, winner: null },
+    { ...valid, winner: true },
+    { ...valid, extra: 'x' },
+  ];
+
+  await withAlternativeApi(async (baseUrl) => {
+    for (const body of cases) {
+      const result = await post('/api/movies', baseUrl, JSON.stringify(body));
+      assert.equal(result.status, 400, JSON.stringify(body));
+      assert.match(result.contentType ?? '', /application\/json/);
+      assert.deepEqual(result.body, { error: 'Corpo inválido' }, JSON.stringify(body));
+    }
+  });
+});
+
+test('POST /api/movies com JSON malformado: 400 em JSON', async () => {
+  await withAlternativeApi(async (baseUrl) => {
+    const result = await post('/api/movies', baseUrl, '{"year":');
+    assert.equal(result.status, 400);
+    assert.match(result.contentType ?? '', /application\/json/);
+    assert.deepEqual(result.body, { error: 'Corpo JSON inválido' });
+  });
+});
+
 test('documentação Swagger: UI em /api-docs/ e spec em /api/openapi.json', async () => {
   await withAlternativeApi(async (baseUrl) => {
     const docs = await fetch(`${baseUrl}/api-docs/`);
@@ -232,7 +470,40 @@ test('documentação Swagger: UI em /api-docs/ e spec em /api/openapi.json', asy
 
     const spec = result.body as SpecResponse;
     assert.equal(spec.openapi, '3.0.3');
-    assert.deepEqual(Object.keys(spec.paths).sort(), ['/api/movies', '/api/producers/intervals']);
+    assert.deepEqual(Object.keys(spec.paths).sort(), [
+      '/api/movies',
+      '/api/producers',
+      '/api/producers/intervals',
+    ]);
+    const producersSpec = spec.paths['/api/producers'].get;
+    assert.deepEqual(Object.keys(producersSpec.responses).sort(), ['200', '400', '500']);
+    assert.deepEqual(
+      producersSpec.parameters.map((parameter) => ({
+        name: parameter.name,
+        type: parameter.schema.type,
+        required: parameter.required,
+      })),
+      [
+        { name: 'name', type: 'string', required: false },
+        { name: 'year', type: 'integer', required: false },
+        { name: 'wins', type: 'integer', required: false },
+        { name: 'onlyWinners', type: 'boolean', required: false },
+        { name: 'sort', type: 'string', required: false },
+      ],
+    );
+    assert.deepEqual(
+      producersSpec.parameters.find((parameter) => parameter.name === 'sort')?.schema.enum,
+      ['wins_desc'],
+    );
+    assert.deepEqual(spec.components.schemas.ProducerSummary, {
+      type: 'object',
+      properties: {
+        producer: { type: 'string' },
+        wins: { type: 'integer' },
+        years: { type: 'array', items: { type: 'integer' } },
+      },
+      required: ['producer', 'wins', 'years'],
+    });
     assert.deepEqual(Object.keys(spec.paths['/api/producers/intervals'].get.responses).sort(), ['200', '500']);
     assert.deepEqual(Object.keys(spec.paths['/api/movies'].get.responses).sort(), ['200', '400', '500']);
     assert.deepEqual(
@@ -249,6 +520,13 @@ test('documentação Swagger: UI em /api-docs/ e spec em /api/openapi.json', asy
         { name: 'winner', type: 'boolean', required: false },
       ],
     );
+
+    const postSpec = spec.paths['/api/movies'].post;
+    assert.deepEqual(Object.keys(postSpec.responses).sort(), ['201', '400', '500']);
+    assert.equal(postSpec.requestBody.required, true);
+    assert.deepEqual(postSpec.requestBody.content['application/json'], {
+      schema: { $ref: '#/components/schemas/NewMovie' },
+    });
   });
 });
 

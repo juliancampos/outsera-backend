@@ -26,6 +26,8 @@ export interface MovieFilters {
 export interface WinsRepository {
   allWins(): Win[];
   allMovies(filters: MovieFilters): Movie[];
+  allProducers(): string[];
+  createMovie(movie: Movie): Movie;
   close(): void;
 }
 
@@ -57,6 +59,16 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function winsFrom(movie: Movie): Win[] {
+  const producers = new Set(
+    movie.producers
+      .split(/\s*(?:,|\band\b)\s*/i)
+      .map((producer) => producer.trim())
+      .filter((producer) => producer.length > 0),
+  );
+  return [...producers].map((producer) => ({ producer, year: movie.year }));
+}
+
 function parseCsv(content: string): { movies: Movie[]; wins: Win[] } {
   const lines = content
     .replace(/^\uFEFF/, '')
@@ -81,15 +93,7 @@ function parseCsv(content: string): { movies: Movie[]; wins: Win[] } {
       movies.push(movie);
       if (!movie.winner) continue;
 
-      const producers = new Set(
-        movie.producers
-          .split(/\s*(?:,|\band\b)\s*/i)
-          .map((producer) => producer.trim())
-          .filter((producer) => producer.length > 0),
-      );
-      for (const producer of producers) {
-        wins.push({ producer, year: movie.year });
-      }
+      wins.push(...winsFrom(movie));
     } catch (error) {
       throw new Error(`linha ${index + 2} inválida (${message(error)})`);
     }
@@ -179,9 +183,32 @@ export async function createWinsRepository(csvPath: string): Promise<WinsReposit
       .map(toMovie);
   };
 
+  const allProducers = (): string[] => [
+    ...new Set(allMovies({}).flatMap((movie) => winsFrom(movie).map((win) => win.producer))),
+  ];
+
+  const createMovie = (movie: Movie): Movie => {
+    db.exec('BEGIN');
+    try {
+      insertMovie.run(movie.year, movie.title, movie.studios, movie.producers, Number(movie.winner));
+      if (movie.winner) {
+        for (const win of winsFrom(movie)) {
+          insertWin.run(win.producer, win.year);
+        }
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw new Error(`falha ao inserir filme: ${message(error)}`);
+    }
+    return movie;
+  };
+
   return {
     allWins: () => select.all().map(toWin),
     allMovies,
+    allProducers,
+    createMovie,
     close: () => db.close(),
   };
 }
