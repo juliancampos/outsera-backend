@@ -128,7 +128,7 @@ Status: **aprovado** para o `Developer`. Solicitação do usuário: "crie rota p
 
 ## 11. Documentação Swagger / OpenAPI (PO — 2026-11-24)
 
-Status: **aguardando aprovação** para o `Developer`. Solicitação do usuário: "implemente o uso do swagger".
+Status: **aprovado** para o `Developer`. Solicitação do usuário: "implemente o uso do swagger".
 
 ### Regras
 

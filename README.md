@@ -14,8 +14,25 @@ maiores intervalos entre prêmios consecutivos.
 docker compose up --build
 ```
 
-A API fica em `http://localhost:3000`. O CSV do repositório é montado como
-somente-leitura em `/app/data/Movielist.csv`, então pode ser trocado sem rebuild.
+A API fica em `http://localhost:3000`. O compose monta `./docs/Movielist.csv`
+como somente-leitura em `/app/data/Movielist.csv` e define
+`CSV_PATH=/app/data/Movielist.csv`. Para usar outro CSV sem rebuild, basta trocar
+a origem do volume no `docker-compose.yml`:
+
+```yaml
+volumes:
+  - ./outro.csv:/app/data/Movielist.csv:ro
+```
+
+Para sobrepor `CSV_PATH` diretamente, sem compose:
+
+```bash
+docker build -t outsera-api .
+docker run --rm -p 3000:3000 \
+  -e CSV_PATH=/app/data/outro.csv \
+  -v "$PWD/outro.csv:/app/data/outro.csv:ro" \
+  outsera-api
+```
 
 ## Rodando localmente
 
@@ -28,7 +45,11 @@ npm start
 Variáveis de ambiente (opcionais):
 
 - `PORT` — porta HTTP (padrão `3000`);
-- `CSV_PATH` — caminho do CSV (padrão `docs/Movielist.csv`).
+- `CSV_PATH` — caminho do CSV (padrão `docs/Movielist.csv`). Exemplo:
+
+```bash
+CSV_PATH=./outro.csv npm start
+```
 
 ## Verificação
 

@@ -86,3 +86,9 @@ Log em texto das interações com LLMs/agentes durante a avaliação. Formato: d
 - **Não bloqueantes apontados:** `winner` na spec sem `enum: [true, false]` (ambiguidade leve para clients gerados), ausência de teste para o redirecionamento 301 de `/api-docs` (comportamento confirmado manualmente), diretório `.opencode/` untracked que seria incluído por `git add -A`, e o caminho do 500 ainda sem teste automatizado.
 - **Ferramentas/skills:** read, shell (somente-leitura); skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
 
+## 2026-11-24 — Interação 13 (documentação — CSV_PATH)
+
+- **Usuário:** perguntou se a possibilidade de alterar `CSV_PATH` por env estava descrita no README e, após a resposta de que estava apenas listada sem exemplo, confirmou: "quero sim".
+- **Agente:** editou `README.md` para mostrar: (1) no compose, trocar a origem do volume montado em `/app/data/Movielist.csv` (o `CSV_PATH` do compose permanece o mesmo); (2) sem compose, `docker build` + `docker run -e CSV_PATH=/app/data/outro.csv -v ...`; (3) localmente, `CSV_PATH=./outro.csv npm start`. Nenhum código/teste alterado.
+- **Ferramentas/skills:** read, edit; modo `ponytail full`.
+
