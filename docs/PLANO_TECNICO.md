@@ -161,3 +161,110 @@ Status: **aprovado** para o `Developer`. Solicitação do usuário: "implemente 
 - Sem `any`, sem dependência desnecessária, sem registro de dados do dataset na spec.
 - `npm test` verde e rotas existentes inalteradas.
 
+## 12. Logs estruturados com pino/pino-http (PO — 2026-11-24)
+
+Status: **aprovado** para o `Developer`. Solicitação do usuário: "implemente logs estruturados utilizando pino e pino-http para gerar logs com o tempo de execução da requisição".
+
+> **Nota (2026-11-25):** L4–L6 e o critério de formato desta seção foram superseded pela seção 13; L1–L3 e L7–L9 permanecem válidos.
+
+### Regras
+
+| # | Regra |
+|---|-------|
+| L1 | Adicionar `pino` e `pino-http` como dependências de runtime. **Não** adicionar `pino-pretty`: em produção o log é JSON em stdout. |
+| L2 | Nova env `LOG_LEVEL` validada com **Zod** em `src/server.ts` (enum `fatal|error|warn|info|debug|trace`, padrão `info`). Criar `src/utils/logger.ts` concentrando os imports de `pino` e `pino-http`: expõe `createLogger(level, destination?)` com `redact` de `req.headers.authorization`/`req.headers.cookie` e `requestLogger(logger)` (middleware). Nenhuma leitura direta de `process.env` fora do `server.ts`. |
+| L3 | `createApp(repository, logger)` passa a exigir o logger; `requestLogger(logger)` de `src/utils/logger.ts` é o **primeiro** middleware, antes das rotas e do 404 — `app.ts` não importa `pino` nem `pino-http` diretamente. O handler de erros troca `console.error` por `logger.error({ err: error }, ...)`; o startup também usa `logger.info`/`logger.error`. |
+| L4 | O log de conclusão padrão do `pino-http` já traz `responseTime` (ms), `req.method`, `req.url` e `res.statusCode`. Não criar header de response-time nem middleware extra só para medir tempo. |
+| L5 | Testes **somente de integração**: o helper `withApi` passa um logger silencioso por padrão (sem poluir a saída) e um teste injeta logger com stream de captura, faz uma requisição real e afirma que existe linha JSON com `responseTime` numérico e os campos da requisição. |
+| L6 | README documenta `LOG_LEVEL`, um exemplo de linha de log e que todas as rotas (incluindo `/api-docs/` e `/api/openapi.json`) são logadas. Swagger não muda. |
+| L7 | Docker sem alteração de arquivos; `LOG_LEVEL` pode ser passada por env no `docker run`/compose como as demais variáveis. |
+| L8 | Tipagem estrita sem `any`; nenhum segredo ou corpo de requisição é logado. |
+| L9 | A centralização pedida vale para as libs de log: `pino`/`pino-http` são importados **apenas** em `src/utils/logger.ts`; `app.ts`, `server.ts` e os testes importam a fachada local. Express, Zod e Swagger permanecem nos arquivos atuais — centralizá-los seria outra mudança, fora deste escopo. |
+
+### Arquivos a modificar
+
+`package.json`, `package-lock.json`, `src/utils/logger.ts` (novo), `src/app.ts`, `src/server.ts`, `test/awards.integration.test.ts`, `README.md`, `docs/PLANO_TECNICO.md` e `AGENT_LOG.md`.
+
+### Checklist do Developer
+
+1. `npm install pino pino-http`.
+2. Criar `src/utils/logger.ts` com `createLogger(level, destination?)`, `requestLogger(logger)` e redaction.
+3. `src/server.ts`: validar `LOG_LEVEL`, criar logger e usá-lo no startup.
+4. `src/app.ts`: exigir logger, montar `requestLogger(logger)` primeiro e logar erros com `logger.error`.
+5. Ajustar `withApi` para logger silencioso e adicionar teste de captura do log com `responseTime`.
+6. README + `AGENT_LOG.md`; `npm run build` e `npm test` verdes; nenhum commit.
+
+### Critérios do Reviewer
+
+- Toda requisição gera exatamente um log estruturado JSON com `responseTime`, método, URL e status; 400/404/500 também logados.
+- `LOG_LEVEL` inválida falha no startup com erro claro; nenhuma env lida fora do `server.ts`.
+- Authorization/cookie não aparecem no log; sem `console.log`/`console.error` no caminho das requisições.
+- `npm test` verde (testes anteriores + novo), sem `any`, sem dependência extra desnecessária, Docker e rotas inalterados.
+
+## 13. Reduzir o log de requisição a URL + tempo (PO — 2026-11-25)
+
+Status: **aprovado** para o `Developer`. Solicitação do usuário: "está sendo gerada muita informação no log. configure o pino para exibir apenas a url chamada e o tempo de resposta".
+
+> **Nota (2026-11-25):** o formato do `responseTime` foi emendado pela seção 14; o restante desta seção permanece válido.
+
+### Regras
+
+| # | Regra |
+|---|-------|
+| N1 | **Corrigir bug existente:** `createLogger(level, destination?)` em `src/utils/logger.ts:9` ignora o parâmetro e fixa `level: 'info'` com comentário incorreto. Passar a usar o `level` recebido, para que `LOG_LEVEL` validado no `server.ts` finalmente tenha efeito. |
+| N2 | `requestLogger(logger)` configura o `pino-http` com `customSuccessObject`/`customErrorObject` retornando **somente** `{ url: req.url, responseTime }`. Sem `req`, `res`, `err`, `method`, `statusCode`, headers, corps ou mensagem. |
+| N3 | Mensagem removida via `customSuccessMessage`/`customErrorMessage` retornando `undefined` (os tipos do `pino-http` exigem `string`, então usar um helper tipado com `unknown` — nunca `any`). Metadados padrão também saem da linha: `timestamp: false` e `formatters.level: () => ({})`; `base: undefined` já remove `pid`/`hostname`. Resultado alvo: `{"url":"/api/movies","responseTime":4}`. |
+| N4 | Logs de erro do próprio app (`logger.error({ err }, ...)`) continuam existindo para diagnóstico — a redução vale para o log automático de requisição do `pino-http`. A redaction existente pode permanecer como defesa em profundidade. |
+| N5 | Atualizar o teste de log em `test/awards.integration.test.ts` para exigir exatamente as chaves `url`/`responseTime`, os valores da requisição e a ausência de `msg`, `req`, `res`, `level`, `time`, `pid` e `hostname`. Manter os headers secretos no teste como garantia de que não vazam. |
+| N6 | README: substituir o exemplo de log pelo formato minimalista e registrar que `LOG_LEVEL` agora é respeitada. |
+| N7 | Nenhuma dependência nova; `src/app.ts`, `src/server.ts`, Docker, rotas e demais fontes intactos. |
+
+### Arquivos a modificar
+
+`src/utils/logger.ts`, `test/awards.integration.test.ts`, `README.md`, `docs/PLANO_TECNICO.md` e `AGENT_LOG.md`.
+
+### Checklist do Developer
+
+1. Corrigir `createLogger` para usar o parâmetro `level` e remover o comentário enganoso.
+2. Configurar `requestLogger` com os dois `custom*Object`, os dois `custom*Message` sem mensagem e a supressão de `level`/`time`.
+3. Ajustar o teste de captura para o formato exato; rodar `npm test` (8/8) e `npm run build`.
+4. README + `AGENT_LOG.md`; nenhum commit.
+
+### Critérios do Reviewer
+
+- Linha de log de requisição contém **apenas** `url` e `responseTime`, inclusive em 400/404/500.
+- `LOG_LEVEL` altera o comportamento do logger (nível passa a ser honrado); nenhum segredo/header aparece.
+- Erros do handler continuam logados com detalhe; sem `any`, sem dependência nova, sem mudança de rotas/Docker.
+
+## 14. Evidenciar a unidade do `responseTime` (PO — 2026-11-25)
+
+Status: **aprovado** para o `Developer`. Solicitação do usuário: "quer que evidencie em qual unidade está o valor do response time. Por exemplo 7 ms".
+
+### Regras
+
+| # | Regra |
+|---|-------|
+| U1 | Manter **exatamente** as chaves `url` e `responseTime`. Não criar campo `responseTimeUnit` nem outro campo — o objetivo continua sendo um log mínimo. |
+| U2 | Em `src/utils/logger.ts`, `requestLogObject` passa a retornar `responseTime` como string no formato `<inteiro> ms` (ex.: `"7 ms"`). O número já vem do `pino-http`; apenas acrescentar o sufixo, sem criar nova medição de tempo. |
+| U3 | O mesmo formato vale para sucesso e erro: `customSuccessObject` e `customErrorObject` continuam usando o mesmo helper. |
+| U4 | Atualizar o teste de captura em `test/awards.integration.test.ts`: manter as chaves exatas, a URL e os headers secretos; trocar a asserção de `number` por regex `/^\d+ ms$/` (com checagem de que o número é finito/não negativo). Continuar esperando o evento de log, sem `setTimeout`. |
+| U5 | README: exemplo passa a `{"url":"/api/producers/intervals","responseTime":"7 ms"}` e o texto deixa claro que `ms` significa milissegundos. Demais parágrafos inalterados. |
+| U6 | Nenhuma dependência nova; `src/app.ts`, `src/server.ts`, Docker, rotas e demais fontes intactos. |
+
+### Arquivos a modificar
+
+`src/utils/logger.ts`, `test/awards.integration.test.ts`, `README.md`, `docs/PLANO_TECNICO.md` e `AGENT_LOG.md`.
+
+### Checklist do Developer
+
+1. Formatar `responseTime` como `` `${ms} ms` `` no helper de `src/utils/logger.ts`.
+2. Ajustar o teste para aceitar string no formato `<inteiro> ms`, preservando as demais asserções.
+3. Atualizar o README e o status da seção 14 para `aprovado`; rodar `npm run build` e `npm test` (8/8).
+4. Registrar a Interação 21 no `AGENT_LOG.md`; nenhum commit.
+
+### Critérios do Reviewer
+
+- Linha de log contém apenas `url` e `responseTime`, inclusive em 400/404/500.
+- `responseTime` é string no formato `<inteiro> ms`; valores secretos continuam ausentes.
+- Sem `any`, sem dependência nova, sem mudança de rotas/Docker; `npm test` 8/8.
+

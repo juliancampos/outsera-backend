@@ -4,10 +4,12 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Writable } from 'node:stream';
 import test from 'node:test';
 import type { Intervals, ProducerInterval } from '../src/awards';
 import { createApp } from '../src/app';
 import { createWinsRepository, type Movie, type WinsRepository } from '../src/db';
+import { createLogger } from '../src/utils/logger';
 
 const root = path.resolve(__dirname, '..', '..');
 
@@ -58,9 +60,13 @@ function sortIntervals(items: ProducerInterval[]): ProducerInterval[] {
   return [...items].sort((a, b) => a.producer.localeCompare(b.producer) || a.previousWin - b.previousWin);
 }
 
-async function withApi(csvPath: string, run: (baseUrl: string) => Promise<void>): Promise<void> {
+async function withApi(
+  csvPath: string,
+  run: (baseUrl: string) => Promise<void>,
+  logger = createLogger('silent'),
+): Promise<void> {
   const repository: WinsRepository = await createWinsRepository(csvPath);
-  const server: Server = createApp(repository).listen(0, '127.0.0.1');
+  const server: Server = createApp(repository, logger).listen(0, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address();
   assert.ok(address && typeof address !== 'string');
@@ -244,4 +250,42 @@ test('documentação Swagger: UI em /api-docs/ e spec em /api/openapi.json', asy
       ],
     );
   });
+});
+
+test('log estruturado: apenas url e responseTime em uma linha JSON', async () => {
+  const lines: string[] = [];
+  const stream = new Writable({
+    write(chunk, _encoding, callback) {
+      const line = String(chunk);
+      lines.push(line);
+      stream.emit('entry', line);
+      callback();
+    },
+  });
+
+  await withApi(path.join(root, 'docs', 'Movielist.csv'), async (baseUrl) => {
+    const logged = once(stream, 'entry');
+    const response = await fetch(`${baseUrl}/api/producers/intervals`, {
+      headers: { authorization: 'Bearer secreto', cookie: 'sessao=secreta' },
+    });
+    await logged;
+    await response.json();
+
+    assert.equal(lines.length, 1);
+    const entry: unknown = JSON.parse(lines[0] ?? '{}');
+    assert.ok(entry && typeof entry === 'object');
+    const log = entry as Record<string, unknown>;
+    assert.deepEqual(Object.keys(log).sort(), ['responseTime', 'url']);
+    assert.equal(log.url, '/api/producers/intervals');
+    assert.equal(typeof log.responseTime, 'string');
+    const responseTime = log.responseTime as string;
+    assert.match(responseTime, /^\d+ ms$/);
+    const ms = Number.parseInt(responseTime, 10);
+    assert.ok(Number.isFinite(ms));
+    assert.ok(ms >= 0);
+    for (const key of ['msg', 'req', 'res', 'level', 'time', 'pid', 'hostname']) {
+      assert.equal(key in log, false, key);
+    }
+    assert.doesNotMatch(lines[0] ?? '', /Bearer secreto|sessao=secreta/);
+  }, createLogger('info', stream));
 });

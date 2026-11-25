@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { getProducerIntervals } from './awards';
 import type { WinsRepository } from './db';
 import { openapi } from './openapi';
+import { requestLogger, type Logger } from './utils/logger';
 
 const movieQuerySchema = z.object({
   year: z
@@ -20,8 +21,10 @@ const movieQuerySchema = z.object({
     .optional(),
 });
 
-export function createApp(repository: WinsRepository): Express {
+export function createApp(repository: WinsRepository, logger: Logger): Express {
   const app = express();
+
+  app.use(requestLogger(logger));
 
   app.get('/api/producers/intervals', (_req, res) => {
     res.json(getProducerIntervals(repository.allWins()));
@@ -47,7 +50,7 @@ export function createApp(repository: WinsRepository): Express {
   });
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    console.error('Erro inesperado:', error);
+    logger.error({ err: error }, 'Erro inesperado');
     res.status(500).json({ error: 'Internal server error' });
   });
 

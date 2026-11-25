@@ -45,6 +45,8 @@ npm start
 Variáveis de ambiente (opcionais):
 
 - `PORT` — porta HTTP (padrão `3000`);
+- `LOG_LEVEL` — nível dos logs: `fatal`, `error`, `warn`, `info`, `debug` ou
+  `trace` (padrão `info`);
 - `CSV_PATH` — caminho do CSV (padrão `docs/Movielist.csv`). Exemplo:
 
 ```bash
@@ -98,6 +100,19 @@ Com a API rodando:
 ```bash
 curl http://localhost:3000/api/openapi.json
 ```
+
+## Logs
+
+Todas as rotas são logadas em JSON em stdout, incluindo `/api-docs/` e
+`/api/openapi.json`. Cada linha do log de requisição contém somente a URL chamada
+e o tempo de resposta em milissegundos (sufixo `ms`). Exemplo:
+
+```json
+{"url":"/api/producers/intervals","responseTime":"7 ms"}
+```
+
+A variável `LOG_LEVEL` agora é respeitada (padrão `info`). Erros internos da
+aplicação continuam sendo registrados com detalhes à parte.
 
 ## Testes
 

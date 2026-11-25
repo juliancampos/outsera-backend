@@ -92,3 +92,71 @@ Log em texto das interações com LLMs/agentes durante a avaliação. Formato: d
 - **Agente:** editou `README.md` para mostrar: (1) no compose, trocar a origem do volume montado em `/app/data/Movielist.csv` (o `CSV_PATH` do compose permanece o mesmo); (2) sem compose, `docker build` + `docker run -e CSV_PATH=/app/data/outro.csv -v ...`; (3) localmente, `CSV_PATH=./outro.csv npm start`. Nenhum código/teste alterado.
 - **Ferramentas/skills:** read, edit; modo `ponytail full`.
 
+## 2026-11-24 — Interação 14 (PO — logs estruturados)
+
+- **Usuário:** "implemente logs estruturados utilizando pino e pino-http para gerar logs com o tempo de execução da requisição".
+- **Agente (PO):** leu `src/app.ts`, `src/server.ts` e `package.json`. Acrescentou a seção 12 a `docs/PLANO_TECNICO.md` com as regras L1–L8, arquivos, checklist e critérios do Reviewer.
+- **Decisões do PO:** `pino` + `pino-http` servindo JSON em stdout (sem `pino-pretty`); `LOG_LEVEL` validada por Zod só em `server.ts`; `createLogger(level, destination?)` com redaction de authorization/cookie; `createApp` passa a exigir logger e `pinoHttp` é o primeiro middleware; `responseTime` vem do log padrão do pino-http (sem header extra nem middleware de medição); teste de integração captura logs via stream injetado, com logger silencioso nos demais testes; README documenta a env e um exemplo, Docker inalterado. Aguardando aprovação antes de chamar o @dev.
+- **Emenda do usuário (ainda na Interação 14):** "crie uma pasta chamada utils, em src, para conter o logger que utilizará o pino. quero concentrar libs importadas em determinados arquivos para futuramente facilitar a troca/manutenção". O PO revisou a seção 12: o arquivo passa a ser `src/utils/logger.ts`, concentrando os imports de `pino` **e** `pino-http` e expondo `createLogger(level, destination?)` + `requestLogger(logger)`; `app.ts` importa só essa fachada. Regra L9 explicitou que Express/Zod/Swagger ficam nos arquivos atuais (fora do escopo). Plano ainda aguardando aprovação.
+- **Ferramentas/skills:** read, edit; skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
+
+## 2026-11-24 21:55 — Interação 15 (Developer)
+
+- **Usuário (via PO):** "O usuário aprovou o plano da seção 12 (com a emenda do `src/utils`), implemente sem fazer commit", seguindo as regras L1–L9, o checklist e os critérios da seção 12 de `docs/PLANO_TECNICO.md`.
+- **Agente (Developer):** instalou `pino` e `pino-http` (sem `pino-pretty`, sem `@types` extras). Criou `src/utils/logger.ts` com `createLogger(level, destination?)` (redact de `req.headers.authorization`/`req.headers.cookie`) e `requestLogger(logger)`, única aba de import das libs de log; `app.ts`, `server.ts` e testes importam apenas essa fachada. `src/server.ts` validou `LOG_LEVEL` com Zod (enum de seis níveis, padrão `info`), criou o logger após o parse e trocou os logs de startup por `logger.info`/`logger.error` (o `main().catch` segue com `console.error` para falha de validação). `src/app.ts` passou a exigir o logger, montou `requestLogger(logger)` como primeiro middleware e trocou o `console.error` do handler 500 por `logger.error({ err: error }, ...)`. Os testes mantiveram os 7 anteriores com logger silencioso default em `withApi` e ganharam um oitavo: stream `Writable` injetado, `once(stream, 'entry')`, requisição HTTP real e asserções de `responseTime` numérico, `req.method`, `req.url`, `res.statusCode` e de que authorization/cookie não vazam. README documentou `LOG_LEVEL`, exemplo de linha com `responseTime` e o log de todas as rotas, incluindo Swagger; status da seção 12 do plano passou a `aprovado`. Nenhum commit.
+- **Comandos rodados:** `npm install pino pino-http`, `npm run build` (limpo), `npm test` (8/8 aprovados), verificação manual com servidor real (logs JSON de `/api/producers/intervals`, `/api-docs/`, `/api/openapi.json` e 400; `LOG_LEVEL=verbose` falha no startup com erro Zod claro) e checagem dos imports de `pino`/`pino-http`.
+- **Ferramentas/skills:** read, write, edit, grep, shell; skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
+- **Observações:** `pino-http@11.0.0` já inclui `responseTime` por padrão, então não houve config extra na fachada. Não houve alteração em `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `db.ts`, `awards.ts`, `openapi.ts`, express/Zod/Swagger ou nas rotas; nenhum header de response-time nem middleware de medição foi criado.
+
+## 2026-11-24 — Interação 16 (QA & Code Reviewer — logs estruturados)
+
+- **Usuário (via PO):** "Revise os logs estruturados antes do commit", conforme workflow `.agents/AGENTES.md`.
+- **Agente (Reviewer):** leu a seção 12 do plano, `src/utils/logger.ts`, `src/app.ts`, `src/server.ts`, os testes e o README; conferiu L1–L9, centralização dos imports, ordem do middleware, `responseTime`, redaction, `LOG_LEVEL`, ausência de `console.*` no caminho das requisições e sem `any`. Rodou `npm run build` (limpo), `npm test` (8/8), `npm audit --omit=dev --audit-level=high` (0 vulnerabilidades) e `git status --short`. Veredito: **APROVADO**, sem bloqueantes; gerou comando de commit sem executá-lo.
+- **Não bloqueantes apontados:** caminho do 500 sem teste com stream capturada, 400/404 sem asserção de log capturado (middleware compartilhado, validação manual feita pelo dev) e divergência de contexto: o repositório já tinha 2 commits (`11440d5`, `9435aa5`) feitos fora destas interações, embora as entradas anteriores dissessem "nenhum commit".
+- **Ferramentas/skills:** read, shell (somente-leitura); skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
+
+## 2026-11-25 — Interação 17 (PO — reduzir logs de requisição)
+
+- **Usuário:** "está sendo gerada muita informação no log. configure o pino para exibir apenas a url chamada e o tempo de resposta".
+- **Agente (PO):** leu `src/utils/logger.ts`, os types/README do `pino-http` e do `pino` instalados e o teste de captura de log. Acrescentou a seção 13 a `docs/PLANO_TECNICO.md` com as regras N1–N7, arquivos, checklist e critérios do Reviewer.
+- **Achado importante:** `createLogger` ignorava o parâmetro `level` e fixava `'info'` com comentário incorreto — `LOG_LEVEL` não tinha efeito; a regra N1 corrige isso.
+- **Decisões do PO:** `customSuccessObject`/`customErrorObject` retornam só `{ url, responseTime }`; mensagem suprimida com helper tipado que retorna `undefined` (os tipos exigem `string`); `timestamp: false` e `formatters.level: () => ({})` removem `time`/`level` da linha; erro do handler continua logado à parte; teste passa a exigir exatamente as duas chaves; README atualizado; sem deps novas e sem mudança em rotas/Docker. Aguardando aprovação antes de chamar o @dev.
+- **Ferramentas/skills:** read, edit, grep; skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
+
+## 2026-11-25 11:33 — Interação 18 (Developer)
+
+- **Usuário (via PO):** "O usuário aprovou o plano da seção 13; implemente sem fazer commit", seguindo as regras N1–N7, o checklist e os critérios da seção 13 de `docs/PLANO_TECNICO.md`.
+- **Agente (Developer):** em `src/utils/logger.ts`, `createLogger` passou a usar o `level` recebido (removido o comentário enganoso), de modo que `LOG_LEVEL` finalmente tem efeito. `requestLogger` passou a configurar `customSuccessObject`/`customErrorObject` com apenas `{ url: req.url, responseTime }`, `customSuccessMessage`/`customErrorMessage` via helper tipado que retorna `undefined` (cast por `unknown`, sem `any`), `timestamp: false`, `formatters.level: () => ({})` e `quietResLogger: true` — último necessário porque o `pino-http` injeta um child com `req` no logger de resposta, que vazaria o campo `req` mesmo com os `custom*Object`. Como `child` herda o cache de nível e o timestamp do pai, o logger de requisição é criado na fachada com o mesmo nível/destino do logger recebido; um `hooks.streamWrite` remove a vírgula inicial que o pino v10 deixa quando `level`/`time`/`base` são suprimidos. Teste de captura reescrito para exigir exatamente as chaves `url`/`responseTime`, os valores da requisição e a ausência de `msg`, `req`, `res`, `level`, `time`, `pid` e `hostname`, mantendo authorization/cookie secretos e esperando o evento de log (sem `setTimeout`). README passou a mostrar o formato minimalista e a registrar que `LOG_LEVEL` é respeitada; status da seção 13 do plano alterado para `aprovado`.
+- **Comandos rodados:** `npm run build` (limpo), `npm test` (8/8 aprovados), grep de imports de `pino`/`pino-http` e `git status --short`. Nenhum commit.
+- **Ferramentas/skills:** read, edit, shell, grep; skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
+- **Observações:** nenhuma dependência nova; `src/app.ts`, `src/server.ts`, Docker, rotas e demais fontes intactos. A supressão da mensagem exige cast por `unknown` porque os tipos do `pino-http` declaram `string` para os `custom*Message`. Não foi usado `messageKey: false` (no pino v10 gera chave `"false"`). A redaction existente em `createLogger` foi mantida como defesa em profundidade.
+
+## 2026-11-25 — Interação 19 (QA & Code Reviewer — logs mínimos)
+
+- **Usuário (via PO):** "Revise a redução dos logs antes do commit", conforme workflow `.agents/AGENTES.md`.
+- **Agente (Reviewer):** leu a seção 13 do plano, `src/utils/logger.ts`, o teste de captura, o README e o diff; conferiu N1–N7, o hook `streamWrite`, o logger de requisição próprio, `quietResLogger`, a ausência de `any`/`messageKey: false` e a permanência dos erros detalhados do handler. Rodou `npm run build` (limpo), `npm test` (8/8), `npm audit` (0 vulnerabilidades) e `grep` de imports. Veredito: **APROVADO**, sem bloqueantes; gerou comando de commit sem executá-lo.
+- **Não bloqueantes apontados:** ausência de captura automatizada para 400/404/500 (mesmos `custom*Object`/`custom*Message`, validação manual); seção 12 ainda descrevia o formato antigo — o PO acrescentou nota de supersedência; com `LOG_LEVEL=warn|error` não há linha automática de requisição, apenas logs de erro do app.
+- **Ferramentas/skills:** read, shell (somente-leitura), edit (nota no plano e este log); skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
+
+## 2026-11-25 — Interação 20 (PO — unidade do responseTime)
+
+- **Usuário:** "quer que evidencie em qual unidade está o valor do response time. Por exemplo 7 ms", após ver o log `{"url":"/api/producers/intervals","responseTime":7}`.
+- **Agente (PO):** leu `src/utils/logger.ts`, o teste de captura e o README. Acrescentou a seção 14 a `docs/PLANO_TECNICO.md` com as regras U1–U6, arquivos, checklist e critérios do Reviewer; anotou a supersedência do formato na seção 13.
+- **Decisões do PO:** manter só `url` e `responseTime` (sem novo campo de unidade); formatar o número já fornecido pelo `pino-http` como string `"<n> ms"` no helper existente, com o mesmo formato para sucesso/erro; teste passa a validar a regex, README mostra o novo exemplo, sem deps novas. Aguardando aprovação antes de chamar o @dev.
+- **Ferramentas/skills:** read, edit; skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
+
+## 2026-11-25 — Interação 21 (Developer)
+
+- **Usuário (via PO):** "O usuário aprovou o plano da seção 14; implemente sem fazer commit", seguindo as regras U1–U6, o checklist e os critérios da seção 14 de `docs/PLANO_TECNICO.md`.
+- **Agente (Developer):** em `src/utils/logger.ts`, `requestLogObject` passou a devolver `responseTime` como string `` `${ms} ms` ``, usando o número já fornecido pelo `pino-http` (sem nova medição); o tipo de retorno do helper passou de `number` para `string`, sem `any`. Como o helper é compartilhado, sucesso e erro (400/404/500) saem com o mesmo sufixo. O teste de captura trocou a asserção numérica por `typeof === 'string'` + regex `/^\d+ ms$/`, com `Number.parseInt` e checagem de finito/não negativo, preservando chaves exatas, URL, headers secretos, ausência de `msg`/`req`/`res`/`level`/`time`/`pid`/`hostname` e a espera pelo evento de log (sem `setTimeout`). README passou a mostrar `{"url":"/api/producers/intervals","responseTime":"7 ms"}` e a indicar que `ms` é milissegundo. Status da seção 14 alterado para `aprovado`. Nenhum commit.
+- **Comandos rodados:** `npm run build` (limpo), `npm test` (8/8 aprovados), captura da linha real gerada, grep de imports de `pino`/`pino-http` e `git status --short`.
+- **Ferramentas/skills:** read, edit, grep, shell; skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
+- **Observações:** nenhuma dependência nova; nenhum campo adicionado ao log; `src/app.ts`, `src/server.ts`, Docker, rotas e demais fontes intactos. Os imports das libs de log continuam apenas em `src/utils/logger.ts`.
+
+## 2026-11-25 — Interação 22 (QA & Code Reviewer — unidade do responseTime)
+
+- **Usuário (via PO):** "Revise a mudança da unidade do responseTime antes do commit", conforme workflow `.agents/AGENTES.md`.
+- **Agente (Reviewer):** leu a seção 14 do plano, `src/utils/logger.ts`, o teste de captura, o README e o diff; conferiu U1–U6, o cast do valor do `pino-http` no `logger.js` instalado, a regex do teste, a ausência de `any`/novas chaves/deps e a sequência de interações no log. Rodou `npm run build` (limpo), `npm test` (8/8), `npm audit` (0 vulnerabilidades) e `grep` de imports. Veredito: **APROVADO**, sem bloqueantes; gerou comando de commit sem executá-lo.
+- **Não bloqueantes apontados:** o checklist da seção 14 citava a Interação 20 em vez da 21 — o PO corrigiu; 400/404/500 seguem sem captura automatizada (mesmo helper compartilhado, 400/404 validados manualmente); o cast interno do `pino-http` depende do contrato da lib. Docker não foi rodado; com `LOG_LEVEL=warn|error` não há linha automática de requisição, por desenho.
+- **Ferramentas/skills:** read, shell (somente-leitura), edit (correção no plano e este log); skills `nodejs-ts-standards` e `sqlite-best-practices`; modo `ponytail full`.
+
