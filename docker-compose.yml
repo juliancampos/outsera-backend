@@ -1,0 +1,9 @@
+services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      CSV_PATH: /app/data/Movielist.csv
+    volumes:
+      - ./docs/Movielist.csv:/app/data/Movielist.csv:ro
