@@ -1,7 +1,7 @@
 import { z } from 'zod';
+import { createWinsRepository } from '../db/repository';
+import { createLogger } from '../utils/logger';
 import { createApp } from './app';
-import { createWinsRepository } from './db';
-import { createLogger } from './utils/logger';
 
 const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),

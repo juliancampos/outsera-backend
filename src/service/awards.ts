@@ -1,4 +1,4 @@
-import type { Win } from './db';
+import type { Win } from '../db/repository';
 
 export interface ProducerInterval {
   producer: string;

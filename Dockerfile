@@ -15,4 +15,4 @@ COPY --from=build /app/dist/src ./dist/src
 COPY docs/Movielist.csv ./data/Movielist.csv
 USER node
 EXPOSE 3000
-CMD ["node", "--experimental-sqlite", "dist/src/server.js"]
+CMD ["node", "--experimental-sqlite", "dist/src/server/server.js"]

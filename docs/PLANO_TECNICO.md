@@ -268,3 +268,42 @@ Status: **aprovado** para o `Developer`. Solicitação do usuário: "quer que ev
 - `responseTime` é string no formato `<inteiro> ms`; valores secretos continuam ausentes.
 - Sem `any`, sem dependência nova, sem mudança de rotas/Docker; `npm test` 8/8.
 
+## 15. Separar a aplicação em pastas (PO — 2026-11-25)
+
+Status: **aprovado** para o `Developer`. Solicitação do usuário: "separe em pastas os arquivos da aplicação. server, db, controller, routes e service. O app deve importar de um outro arquivo as rotas, e as rotas devem importar de outros arquivos os controllers".
+
+> **Nota:** seções anteriores que citam `src/app.ts`, `src/server.ts`, `src/db.ts`, `src/awards.ts` ou `src/openapi.ts` devem ser lidas com os novos caminhos desta seção. Comportamento, rotas, respostas e logs não mudam.
+
+### Regras
+
+| # | Regra |
+|---|-------|
+| D1 | Estrutura alvo: `src/server/` (`app.ts`, `server.ts`), `src/db/repository.ts`, `src/controller/` (`movies.ts`, `producers.ts`), `src/routes/` (`index.ts`, `openapi.ts`), `src/service/awards.ts`. `src/utils/logger.ts` permanece onde está. Usar `git mv` para preservar histórico. |
+| D2 | `src/server/app.ts` mantém `createApp(repository, logger)`: `requestLogger` continua sendo o **primeiro** middleware, depois vem `createRoutes(repository)`, e só então 404 e 500. O app **não** define rotas nem valida query: importa as rotas de `../routes`. |
+| D3 | `src/routes/index.ts` exporta `createRoutes(repository): Router` e registra `/api/producers/intervals`, `/api/movies`, `/api/openapi.json` e `/api-docs`, nessa ordem. As rotas importam os controllers de `../controller/*`; os endpoints de documentação usam `../routes/openapi` e `swagger-ui-express` diretamente, sem controller extra. |
+| D4 | `src/controller/producers.ts` chama `getProducerIntervals(repository.allWins())`. `src/controller/movies.ts` mantém o schema Zod da query (movido do app), responde `400` em JSON se inválido e chama `repository.allMovies(parsed.data)`. Ambos Retornam `RequestHandler` tipado, sem `any`. |
+| D5 | `src/service/awards.ts` contém a lógica atual de intervalos e importa tipos de `../db/repository`. `src/db/repository.ts` contém o repositório atual, inalterado. |
+| D6 | `src/server/server.ts` mantém a validação Zod de `PORT`/`CSV_PATH`/`LOG_LEVEL` e o bootstrap; nenhuma leitura de `process.env` fora dele. Ajustar `package.json` (`main` e script `start`) e `Dockerfile` (`CMD`) para `dist/src/server/server.js`. |
+| D7 | Atualizar os imports do teste de integração (`../src/service/awards`, `../src/server/app`, `../src/db/repository`) sem mudificar asserções. Nenhuma dependência nova; `npm test` permanece 8/8; Docker, README e comportamento das rotas inalterados. |
+
+### Arquivos a modificar
+
+Mover: `src/app.ts` → `src/server/app.ts`, `src/server.ts` → `src/server/server.ts`, `src/db.ts` → `src/db/repository.ts`, `src/awards.ts` → `src/service/awards.ts`, `src/openapi.ts` → `src/routes/openapi.ts`.
+Criar: `src/controller/movies.ts`, `src/controller/producers.ts`, `src/routes/index.ts`.
+Ajustar: `package.json`, `Dockerfile`, `test/awards.integration.test.ts`, `docs/PLANO_TECNICO.md`, `AGENT_LOG.md`.
+
+### Checklist do Developer
+
+1. `git mv` dos cinco arquivos e criação dos três novos, conforme D1–D5.
+2. Ajustar imports internos e o entrypoint em `package.json`/`Dockerfile` (D6).
+3. Ajustar imports do teste; rodar `npm run build` e `npm test` (8/8).
+4. Atualizar o status da seção 15 e registrar a Interação 24 no `AGENT_LOG.md`; nenhum commit.
+
+### Critérios do Reviewer
+
+- `src/server/app.ts` não declara rotas nem validação de query; importa `createRoutes` de `../routes`.
+- `src/routes/index.ts` registra as quatro rotas e importa os controllers de `../controller/*`.
+- `requestLogger` continua primeiro; 404/500 continuam depois das rotas; logs seguem `{ url, responseTime: "<n> ms" }`.
+- Entrypoint compilado `dist/src/server/server.js` existe e é usado por `npm start` e Docker.
+- Sem dependência nova, sem `any`, sem mudança de comportamento; `npm test` 8/8.
+

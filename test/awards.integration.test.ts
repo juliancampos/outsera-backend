@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Writable } from 'node:stream';
 import test from 'node:test';
-import type { Intervals, ProducerInterval } from '../src/awards';
-import { createApp } from '../src/app';
-import { createWinsRepository, type Movie, type WinsRepository } from '../src/db';
+import { createApp } from '../src/server/app';
+import { createWinsRepository, type Movie, type WinsRepository } from '../src/db/repository';
+import type { Intervals, ProducerInterval } from '../src/service/awards';
 import { createLogger } from '../src/utils/logger';
 
 const root = path.resolve(__dirname, '..', '..');
